@@ -9,6 +9,7 @@ import random
 import matplotlib.pyplot as plt
 
 import os
+import csv
 from collections import deque
 
 from environment import TetrisEnv
