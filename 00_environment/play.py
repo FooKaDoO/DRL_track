@@ -259,7 +259,7 @@ def draw_background(screen, total_width, total_height):
 
 # ── Manual play ───────────────────────────────────────────────────────
 
-def play_manual(env):
+def play_manual(env: TetrisEnv):
 
     board_width = env.cols * CELL_SIZE
     board_height = env.rows * CELL_SIZE
@@ -328,7 +328,7 @@ def play_manual(env):
 
 # ── Agent play ───────────────────────────────────────────────────────
 
-def play_agent(env, model_path):
+def play_agent(env: TetrisEnv, model_path: str):
 
     board_width = env.cols * CELL_SIZE
     board_height = env.rows * CELL_SIZE
