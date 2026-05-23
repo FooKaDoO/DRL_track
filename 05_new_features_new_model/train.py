@@ -18,12 +18,15 @@ from model import DQN
 EPISODES = 2000
 BATCH_SIZE = 512
 GAMMA = 0.99
-LR = 1e-3
+LR = 5e-4
 MEMORY_SIZE = 30000
 EPSILON_START = 1.0
 EPSILON_END = 0.001
 EPSILON_DECAY = 0.995
 TARGET_UPDATE = 10
+TORCH_NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
+
+torch.set_num_threads(TORCH_NUM_THREADS)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -83,6 +86,11 @@ def train():
 
     env = TetrisEnv()
     model = DQN(env.state_size).to(device)
+
+    print(f"Device: {device}")
+    print(f"Torch threads: {torch.get_num_threads()}")
+    print(f"State size: {env.state_size}")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
 
     target_model = DQN(env.state_size).to(device)
     target_model.load_state_dict(model.state_dict())
@@ -170,15 +178,35 @@ def train():
                 # q targets
                 b_targets = b_rewards.clone()
 
-                for i in range(BATCH_SIZE):
+                next_state_batches = []
+                next_state_batch_indices = []
+                next_state_counts = []
 
-                    if not b_dones[i] and len(batch[i][3]) > 0:
+                for i, transition in enumerate(batch):
 
-                        nn_states = torch.tensor(np.array(batch[i][3]), dtype=torch.float32, device=device) # next next states for target q value
+                    if not b_dones[i] and len(transition[3]) > 0:
 
-                        with torch.no_grad():
-                            max_q_next = target_model( nn_states ).max().item() # max q value
-                            b_targets[i] += GAMMA * max_q_next # q target = reward + gamma * (max q value of next states)
+                        next_state_batches.append(np.array(transition[3], dtype=np.float32))
+                        next_state_batch_indices.append(i)
+                        next_state_counts.append(len(transition[3]))
+
+                if next_state_batches:
+
+                    nn_states = torch.tensor(
+                        np.concatenate(next_state_batches, axis=0),
+                        dtype=torch.float32,
+                        device=device,
+                    )
+
+                    with torch.no_grad():
+                        next_q_values = target_model(nn_states).squeeze(1)
+
+                    offset = 0
+                    for batch_index, count in zip(next_state_batch_indices, next_state_counts):
+
+                        max_q_next = next_q_values[offset:offset + count].max()
+                        b_targets[batch_index] += GAMMA * max_q_next
+                        offset += count
                             
                 b_targets = b_targets.unsqueeze(1)
                 
