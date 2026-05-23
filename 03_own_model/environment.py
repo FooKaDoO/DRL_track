@@ -84,8 +84,38 @@ class TetrisEnv:
 
         self.rows = rows
         self.cols = cols
+        self._init_geometry_cache()
 
         self.reset()
+
+    def _init_geometry_cache(self):
+
+        self._piece_rotations = {
+            piece: [np.array(shape, dtype=np.int16) for shape in rotations]
+            for piece, rotations in TETROMINOES.items()
+        }
+        self._shape_bounds = {
+            piece: [
+                (
+                    int(shape[:, 0].min()),
+                    int(shape[:, 0].max()),
+                    int(shape[:, 1].min()),
+                    int(shape[:, 1].max()),
+                )
+                for shape in rotations
+            ]
+            for piece, rotations in self._piece_rotations.items()
+        }
+
+        self._row_from_bottom = (self.rows - 1 - np.arange(self.rows, dtype=np.float32))[:, None]
+
+        if self.cols == 1:
+            self._col_positions = np.zeros((1, self.cols), dtype=np.float32)
+        else:
+            self._col_positions = np.linspace(0.0, 1.0, self.cols, dtype=np.float32)[None, :]
+
+        self._distance_from_middle = np.abs(1.0 - 2.0 * self._col_positions).astype(np.float32)
+        self._feature_names = self._build_state_feature_names()
 
 
     def reset(self):
@@ -113,7 +143,7 @@ class TetrisEnv:
 
     def _get_rotations(self, piece_name):
 
-        return TETROMINOES[piece_name]
+        return self._piece_rotations[piece_name]
 
     def _current_shape(self):
 
@@ -130,16 +160,18 @@ class TetrisEnv:
         Check if placing shape at (row, col) is inside bounds and empty.
         """
 
-        for dr, dc in shape:
+        rows = row + shape[:, 0]
+        cols = col + shape[:, 1]
 
-            r, c = row + dr, col + dc
-
-            if r < 0 or r >= self.rows or c < 0 or c >= self.cols:
-                return False
-            if self.board[r][c]:
-                return False
+        if (
+            np.any(rows < 0)
+            or np.any(rows >= self.rows)
+            or np.any(cols < 0)
+            or np.any(cols >= self.cols)
+        ):
+            return False
             
-        return True
+        return not np.any(self.board[rows, cols] > 0)
 
     # manual play methods
 
@@ -153,8 +185,7 @@ class TetrisEnv:
         self.piece_rotation = 0
 
         shape = self._current_shape()
-        min_col = min(c for _, c in shape)
-        max_col = max(c for _, c in shape)
+        _, _, min_col, max_col = self._shape_bounds[self.current_piece][self.piece_rotation]
 
         self.piece_col = (self.cols - (max_col - min_col + 1)) // 2 - min_col
         self.piece_row = 0
@@ -235,18 +266,17 @@ class TetrisEnv:
             return 0, self.game_over, {"score": self.score, "lines_cleared": self.lines_cleared}
 
         shape = self._current_shape()
-        while self._is_valid_position(shape, self.piece_row + 1, self.piece_col):
-            self.piece_row += 1
+        drop_row = self._get_drop_row(shape, self.piece_col, start_row=self.piece_row)
+
+        if drop_row >= self.piece_row:
+            self.piece_row = drop_row
 
         return self._lock_and_advance()
 
     def _lock_and_advance(self):
         """Lock the current piece onto the board, clear lines, spawn next."""
         shape = self._current_shape()
-        for dr, dc in shape:
-            r, c = self.piece_row + dr, self.piece_col + dc
-            if 0 <= r < self.rows and 0 <= c < self.cols:
-                self.board[r][c] = 1.0
+        self._place_shape_on_board(self.board, shape, self.piece_row, self.piece_col)
 
         self.piece_active = False
         cleared = self._clear_lines()
@@ -284,12 +314,9 @@ class TetrisEnv:
             return self.piece_row
         
         shape = self._current_shape()
+        drop_row = self._get_drop_row(shape, self.piece_col, start_row=self.piece_row)
 
-        row = self.piece_row
-        while self._is_valid_position(shape, row + 1, self.piece_col):
-            row += 1
-
-        return row
+        return max(self.piece_row, drop_row)
 
     # line clearing
     def _clear_lines(self):
@@ -325,38 +352,57 @@ class TetrisEnv:
 
         for rot_idx, shape in enumerate(rotations):
 
-            min_col = min(c for _, c in shape)
-            max_col = max(c for _, c in shape)
+            _, _, min_col, max_col = self._shape_bounds[self.current_piece][rot_idx]
             for col in range(-min_col, self.cols - max_col):
-                if self._check_hard_drop_valid(shape, col):
-                    actions.append((rot_idx, col))
+                actions.append((rot_idx, col))
 
         return actions
 
     def _check_hard_drop_valid(self, shape, col):
 
-        for dr, dc in shape:
+        cols = col + shape[:, 1]
 
-            c = col + dc
-            if c < 0 or c >= self.cols:
-                return False
-            
-        return True
+        return bool(np.all((cols >= 0) & (cols < self.cols)))
 
-    def _get_drop_row(self, shape, col):
+    def _get_drop_row(self, shape, col, start_row=0, board=None):
 
-        last_valid = -1
+        if board is None:
+            board = self.board
 
-        for row in range(self.rows):
-            if self._is_valid_position(shape, row, col):
+        cols = col + shape[:, 1]
+        if np.any(cols < 0) or np.any(cols >= self.cols):
+            return -1
 
-                last_valid = row
+        max_start_row = self.rows - 1 - int(np.max(shape[:, 0]))
+        if start_row > max_start_row:
+            return -1
 
-            else:
+        candidate_rows = np.arange(start_row, max_start_row + 1, dtype=np.int16)
+        board_rows = candidate_rows[:, None] + shape[:, 0][None, :]
+        occupied = board[board_rows, cols[None, :]] > 0
+        valid_rows = ~np.any(occupied, axis=1)
 
-                break
+        if valid_rows.size == 0 or not valid_rows[0]:
+            return -1 if start_row == 0 else start_row
 
-        return last_valid
+        first_invalid = np.flatnonzero(~valid_rows)
+        if first_invalid.size == 0:
+            return int(candidate_rows[-1])
+
+        return int(candidate_rows[first_invalid[0] - 1])
+
+    def _place_shape_on_board(self, board, shape, row, col):
+
+        rows = row + shape[:, 0]
+        cols = col + shape[:, 1]
+        valid_cells = (
+            (rows >= 0)
+            & (rows < self.rows)
+            & (cols >= 0)
+            & (cols < self.cols)
+        )
+
+        board[rows[valid_cells], cols[valid_cells]] = 1.0
 
     def step(self, action):
 
@@ -378,10 +424,7 @@ class TetrisEnv:
             return self._get_state(), -10.0, True, {"score": self.score}
 
         # lock piece in place
-        for dr, dc in shape:
-
-            r, c = drop_row + dr, col + dc
-            self.board[r][c] = 1.0
+        self._place_shape_on_board(self.board, shape, drop_row, col)
 
         cleared = self._clear_lines()
 
@@ -398,8 +441,8 @@ class TetrisEnv:
         self.score += reward
         self.lines_cleared += cleared
 
-        heights = self._get_column_heights()
-        reward -= max(heights) * 0.5
+        max_height = float(np.max(self._column_heights_from_board(self.board)))
+        reward -= max_height * 0.5
 
         self.current_piece = self.next_piece
         self.next_piece = self._random_piece()
@@ -546,9 +589,8 @@ class TetrisEnv:
             where=heights > 0,
         )
 
-        row_from_bottom = (self.rows - 1 - np.arange(self.rows, dtype=np.float32))[:, None]
         height_denominator = np.maximum(heights - 1.0, 1.0)[None, :]
-        hole_heights = row_from_bottom / height_denominator
+        hole_heights = self._row_from_bottom / height_denominator
         vertical_depths = 1.0 - hole_heights
 
         vertical_hole_depths = self._masked_mean(vertical_depths, hole_mask, axis=0)
@@ -559,14 +601,8 @@ class TetrisEnv:
             valid_vertical_clusters,
         )
 
-        if self.cols == 1:
-            col_positions = np.zeros((1, self.cols), dtype=np.float32)
-        else:
-            col_positions = np.linspace(0.0, 1.0, self.cols, dtype=np.float32)[None, :]
-
-        distance_from_middle = np.abs(1.0 - 2.0 * col_positions)
-        horizontal_hole_distances = self._masked_mean(distance_from_middle, hole_mask, axis=1)
-        horizontal_hole_position_std = self._masked_std(col_positions, hole_mask, axis=1)
+        horizontal_hole_distances = self._masked_mean(self._distance_from_middle, hole_mask, axis=1)
+        horizontal_hole_position_std = self._masked_std(self._col_positions, hole_mask, axis=1)
         valid_horizontal_clusters = hole_counts_per_row >= 2
         horizontal_hole_clusteredness = self._clusteredness_from_std(
             horizontal_hole_position_std,
@@ -603,11 +639,11 @@ class TetrisEnv:
             valid_horizontal_clusters,
         )
 
-        hole_distances = np.sqrt((vertical_depths ** 2 + distance_from_middle ** 2) / 2.0)
+        hole_distances = np.sqrt((vertical_depths ** 2 + self._distance_from_middle ** 2) / 2.0)
         mean_hole_distance = self._masked_mean_scalar(hole_distances, hole_mask)
 
         # True 2D clusteredness: spread of hole coordinates, not spread of a scalar distance.
-        hole_x_std = self._masked_std_scalar(col_positions, hole_mask)
+        hole_x_std = self._masked_std_scalar(self._col_positions, hole_mask)
         hole_y_std = self._masked_std_scalar(vertical_depths, hole_mask)
         max_2d_std = np.sqrt(0.5)
         general_hole_clusteredness = 0.0
@@ -663,15 +699,13 @@ class TetrisEnv:
         if drop_row < 0:
             return None
         
-        for dr, dc in shape:
-            r, c = drop_row + dr, col + dc
-            board_copy[r][c] = 1.0
+        self._place_shape_on_board(board_copy, shape, drop_row, col)
 
         board_copy, _ = self._clear_lines_from_board(board_copy)
 
         return self._get_board_features(board_copy)
 
-    def _state_feature_names(self):
+    def _build_state_feature_names(self):
 
         return (
             [f"fill_height_col_{c}" for c in range(self.cols)]
@@ -704,8 +738,8 @@ class TetrisEnv:
     @property
     def state_feature_names(self):
 
-        return self._state_feature_names()
+        return self._feature_names
 
     @property
     def state_size(self):
-        return len(self._state_feature_names())
+        return len(self._feature_names)
