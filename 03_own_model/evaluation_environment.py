@@ -445,6 +445,41 @@ class TetrisEnv:
 
         return sum(1 for r in range(self.rows) if all(self.board[r]))
 
+    def _get_state(self):
+
+        return self._get_board_features(self.board)
+
+    def get_state_for_action(self, action):
+
+        """
+            simulate an action and return the resulting state (without modifying the board)
+        """
+
+        rot_idx, col = action
+        shape = self._get_rotations(self.current_piece)[rot_idx]
+        board_copy = self.board.copy()
+        drop_row = self._get_drop_row(shape, col)
+
+        if drop_row < 0:
+            return None
+        
+        for dr, dc in shape:
+            r, c = drop_row + dr, col + dc
+            board_copy[r][c] = 1.0
+
+        full_rows = [i for i in range(self.rows) if all(board_copy[i])]
+
+        for row in full_rows:
+            board_copy = np.delete(board_copy, row, axis=0)
+            board_copy = np.vstack([np.zeros((1, self.cols), dtype=np.float32), board_copy])
+
+        return self._get_board_features(board_copy)
+
+    @property
+    def state_size(self):
+        return 4 * self.cols + 2 * self.rows + 15
+
+
     def _get_board_features(self, board):
 
         """
@@ -633,37 +668,3 @@ class TetrisEnv:
         ])
 
         return features.astype(np.float32)
-
-    def _get_state(self):
-
-        return self._get_board_features(self.board)
-
-    def get_state_for_action(self, action):
-
-        """
-            simulate an action and return the resulting state (without modifying the board)
-        """
-
-        rot_idx, col = action
-        shape = self._get_rotations(self.current_piece)[rot_idx]
-        board_copy = self.board.copy()
-        drop_row = self._get_drop_row(shape, col)
-
-        if drop_row < 0:
-            return None
-        
-        for dr, dc in shape:
-            r, c = drop_row + dr, col + dc
-            board_copy[r][c] = 1.0
-
-        full_rows = [i for i in range(self.rows) if all(board_copy[i])]
-
-        for row in full_rows:
-            board_copy = np.delete(board_copy, row, axis=0)
-            board_copy = np.vstack([np.zeros((1, self.cols), dtype=np.float32), board_copy])
-
-        return self._get_board_features(board_copy)
-
-    @property
-    def state_size(self):
-        return 4 * self.cols + 2 * self.rows + 15
