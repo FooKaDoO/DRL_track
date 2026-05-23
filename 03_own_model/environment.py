@@ -294,13 +294,22 @@ class TetrisEnv:
     # line clearing
     def _clear_lines(self):
 
-        full_rows = [i for i in range(self.rows) if all(self.board[i])]
+        self.board, cleared = self._clear_lines_from_board(self.board)
 
-        for row in full_rows:
-            self.board = np.delete(self.board, row, axis=0)
-            self.board = np.vstack([np.zeros((1, self.cols), dtype=np.float32), self.board])
+        return cleared
 
-        return len(full_rows)
+    def _clear_lines_from_board(self, board):
+
+        full_rows = np.all(board > 0, axis=1)
+        cleared = int(np.sum(full_rows))
+
+        if cleared == 0:
+            return board, 0
+
+        empty_rows = np.zeros((cleared, self.cols), dtype=np.float32)
+        remaining_rows = board[~full_rows]
+
+        return np.vstack([empty_rows, remaining_rows]).astype(np.float32), cleared
 
     # RL training interface (instant hard-drop)
 
@@ -409,51 +418,236 @@ class TetrisEnv:
 
     # state features for the RL agent
 
+    def _column_heights_from_board(self, board):
+
+        filled = board > 0
+        has_block = np.any(filled, axis=0)
+        first_filled_rows = np.argmax(filled, axis=0)
+
+        return np.where(has_block, self.rows - first_filled_rows, 0).astype(np.float32)
+
+    def _hole_mask_from_board(self, board):
+
+        filled = board > 0
+        inside_column_height = np.maximum.accumulate(filled, axis=0)
+
+        return inside_column_height & ~filled
+
+    def _masked_mean(self, values, mask, axis):
+
+        counts = np.sum(mask, axis=axis).astype(np.float32)
+        sums = np.sum(np.where(mask, values, 0.0), axis=axis).astype(np.float32)
+
+        return np.divide(
+            sums,
+            counts,
+            out=np.zeros_like(sums, dtype=np.float32),
+            where=counts > 0,
+        )
+
+    def _masked_std(self, values, mask, axis, min_count=2):
+
+        counts = np.sum(mask, axis=axis).astype(np.float32)
+        means = self._masked_mean(values, mask, axis)
+        expanded_means = np.expand_dims(means, axis=axis)
+        squared_error = np.where(mask, (values - expanded_means) ** 2, 0.0)
+        variance_sums = np.sum(squared_error, axis=axis).astype(np.float32)
+
+        variances = np.divide(
+            variance_sums,
+            counts,
+            out=np.zeros_like(variance_sums, dtype=np.float32),
+            where=counts >= min_count,
+        )
+
+        return np.sqrt(variances).astype(np.float32)
+
+    def _masked_mean_scalar(self, values, mask):
+
+        count = float(np.sum(mask))
+        if count == 0:
+            return 0.0
+
+        return float(np.sum(np.where(mask, values, 0.0)) / count)
+
+    def _masked_std_scalar(self, values, mask, min_count=2):
+
+        count = float(np.sum(mask))
+        if count < min_count:
+            return 0.0
+
+        mean = self._masked_mean_scalar(values, mask)
+        variance = np.sum(np.where(mask, (values - mean) ** 2, 0.0)) / count
+
+        return float(np.sqrt(variance))
+
+    def _safe_group_mean(self, values, valid_groups):
+
+        if not np.any(valid_groups):
+            return 0.0
+
+        return float(np.mean(values[valid_groups]))
+
+    def _safe_group_std(self, values, valid_groups):
+
+        if not np.any(valid_groups):
+            return 0.0
+
+        return float(np.std(values[valid_groups]))
+
+    def _clusteredness_from_std(self, std_values, valid_groups):
+
+        clusteredness = 1.0 - 2.0 * std_values
+        clusteredness = np.clip(clusteredness, 0.0, 1.0).astype(np.float32)
+
+        return np.where(valid_groups, clusteredness, 0.0).astype(np.float32)
+
     def _get_column_heights(self):
 
-        heights = []
-        for c in range(self.cols):
-            h = 0
-            for r in range(self.rows):
-                if self.board[r][c]:
-                    h = self.rows - r
-                    break
-            heights.append(h)
-
-        return heights
+        return self._column_heights_from_board(self.board).astype(int).tolist()
 
     def _count_holes(self):
 
-        holes = 0
-        for c in range(self.cols):
-            found = False
-            for r in range(self.rows):
-                if self.board[r][c]:
-                    found = True
-                elif found:
-                    holes += 1
-
-        return holes
+        return int(np.sum(self._hole_mask_from_board(self.board)))
 
     def _bumpiness(self):
 
-        heights = self._get_column_heights()
+        heights = self._column_heights_from_board(self.board)
 
-        return sum(abs(heights[i] - heights[i + 1]) for i in range(len(heights) - 1))
+        return float(np.sum(np.abs(np.diff(heights))))
 
     def _complete_lines(self):
 
-        return sum(1 for r in range(self.rows) if all(self.board[r]))
+        return int(np.sum(np.all(self.board > 0, axis=1)))
+
+    def _get_board_features(self, board):
+
+        heights = self._column_heights_from_board(board)
+        fill_heights = heights / float(self.rows)
+
+        total_height = float(np.sum(heights))
+        total_holes_denominator = total_height if total_height > 0.0 else 1.0
+
+        mean_height = float(np.mean(fill_heights))
+        height_deviation = float(np.std(fill_heights))
+        lowest_point = float(np.min(fill_heights))
+        highest_point = float(np.max(fill_heights))
+
+        hole_mask = self._hole_mask_from_board(board)
+        hole_counts_per_col = np.sum(hole_mask, axis=0).astype(np.float32)
+        hole_counts_per_row = np.sum(hole_mask, axis=1).astype(np.float32)
+        total_holes = float(np.sum(hole_counts_per_col))
+        total_holeyness = total_holes / total_holes_denominator
+
+        hole_height_per_col = np.divide(
+            hole_counts_per_col,
+            heights,
+            out=np.zeros_like(hole_counts_per_col, dtype=np.float32),
+            where=heights > 0,
+        )
+
+        row_from_bottom = (self.rows - 1 - np.arange(self.rows, dtype=np.float32))[:, None]
+        height_denominator = np.maximum(heights - 1.0, 1.0)[None, :]
+        hole_heights = row_from_bottom / height_denominator
+        vertical_depths = 1.0 - hole_heights
+
+        vertical_hole_depths = self._masked_mean(vertical_depths, hole_mask, axis=0)
+        vertical_hole_height_std = self._masked_std(hole_heights, hole_mask, axis=0)
+        valid_vertical_clusters = hole_counts_per_col >= 2
+        vertical_hole_clusteredness = self._clusteredness_from_std(
+            vertical_hole_height_std,
+            valid_vertical_clusters,
+        )
+
+        if self.cols == 1:
+            col_positions = np.zeros((1, self.cols), dtype=np.float32)
+        else:
+            col_positions = np.linspace(0.0, 1.0, self.cols, dtype=np.float32)[None, :]
+
+        distance_from_middle = np.abs(1.0 - 2.0 * col_positions)
+        horizontal_hole_distances = self._masked_mean(distance_from_middle, hole_mask, axis=1)
+        horizontal_hole_position_std = self._masked_std(col_positions, hole_mask, axis=1)
+        valid_horizontal_clusters = hole_counts_per_row >= 2
+        horizontal_hole_clusteredness = self._clusteredness_from_std(
+            horizontal_hole_position_std,
+            valid_horizontal_clusters,
+        )
+
+        valid_vertical_depths = hole_counts_per_col >= 1
+        mean_hole_depth = self._safe_group_mean(vertical_hole_depths, valid_vertical_depths)
+        hole_depth_deviation = self._safe_group_std(vertical_hole_depths, valid_vertical_depths)
+        mean_hole_vertical_clusteredness = self._safe_group_mean(
+            vertical_hole_clusteredness,
+            valid_vertical_clusters,
+        )
+        hole_vertical_instability = self._safe_group_std(
+            vertical_hole_clusteredness,
+            valid_vertical_clusters,
+        )
+
+        valid_horizontal_distances = hole_counts_per_row >= 1
+        mean_hole_edge_distance = self._safe_group_mean(
+            horizontal_hole_distances,
+            valid_horizontal_distances,
+        )
+        hole_edge_distance_deviation = self._safe_group_std(
+            horizontal_hole_distances,
+            valid_horizontal_distances,
+        )
+        mean_hole_horizontal_clusteredness = self._safe_group_mean(
+            horizontal_hole_clusteredness,
+            valid_horizontal_clusters,
+        )
+        hole_horizontal_instability = self._safe_group_std(
+            horizontal_hole_clusteredness,
+            valid_horizontal_clusters,
+        )
+
+        hole_distances = np.sqrt((vertical_depths ** 2 + distance_from_middle ** 2) / 2.0)
+        mean_hole_distance = self._masked_mean_scalar(hole_distances, hole_mask)
+
+        # True 2D clusteredness: spread of hole coordinates, not spread of a scalar distance.
+        hole_x_std = self._masked_std_scalar(col_positions, hole_mask)
+        hole_y_std = self._masked_std_scalar(vertical_depths, hole_mask)
+        max_2d_std = np.sqrt(0.5)
+        general_hole_clusteredness = 0.0
+        if total_holes >= 2.0:
+            general_hole_clusteredness = 1.0 - (np.sqrt(hole_x_std ** 2 + hole_y_std ** 2) / max_2d_std)
+            general_hole_clusteredness = float(np.clip(general_hole_clusteredness, 0.0, 1.0))
+
+        features = np.concatenate([
+            fill_heights,
+            np.array([
+                total_holeyness,
+                mean_height,
+                height_deviation,
+                lowest_point,
+                highest_point,
+            ], dtype=np.float32),
+            hole_height_per_col,
+            vertical_hole_depths,
+            vertical_hole_clusteredness,
+            horizontal_hole_distances,
+            horizontal_hole_clusteredness,
+            np.array([
+                mean_hole_depth,
+                mean_hole_vertical_clusteredness,
+                hole_depth_deviation,
+                hole_vertical_instability,
+                mean_hole_edge_distance,
+                mean_hole_horizontal_clusteredness,
+                hole_edge_distance_deviation,
+                hole_horizontal_instability,
+                mean_hole_distance,
+                general_hole_clusteredness,
+            ], dtype=np.float32),
+        ])
+
+        return features.astype(np.float32)
 
     def _get_state(self):
 
-        heights = self._get_column_heights()
-        holes = self._count_holes()
-        bumpiness = self._bumpiness()
-        total_height = sum(heights)
-        complete = self._complete_lines()
-
-        return np.array(heights + [holes, bumpiness, total_height, complete], dtype=np.float32)
+        return self._get_board_features(self.board)
 
     def get_state_for_action(self, action):
 
@@ -473,34 +667,45 @@ class TetrisEnv:
             r, c = drop_row + dr, col + dc
             board_copy[r][c] = 1.0
 
-        full_rows = [i for i in range(self.rows) if all(board_copy[i])]
+        board_copy, _ = self._clear_lines_from_board(board_copy)
 
-        for row in full_rows:
-            board_copy = np.delete(board_copy, row, axis=0)
-            board_copy = np.vstack([np.zeros((1, self.cols), dtype=np.float32), board_copy])
+        return self._get_board_features(board_copy)
 
-        heights = []
-        for c in range(self.cols):
-            h = 0
-            for r in range(self.rows):
-                if board_copy[r][c]:
-                    h = self.rows - r
-                    break
-            heights.append(h)
-            
-        holes = 0
-        for c in range(self.cols):
-            found = False
-            for r in range(self.rows):
-                if board_copy[r][c]:
-                    found = True
-                elif found:
-                    holes += 1
-        bumpiness = sum(abs(heights[i] - heights[i + 1]) for i in range(len(heights) - 1))
-        total_height = sum(heights)
-        complete = sum(1 for r in range(self.rows) if all(board_copy[r]))
-        return np.array(heights + [holes, bumpiness, total_height, complete], dtype=np.float32)
+    def _state_feature_names(self):
+
+        return (
+            [f"fill_height_col_{c}" for c in range(self.cols)]
+            + [
+                "total_holeyness",
+                "mean_height",
+                "height_deviation",
+                "lowest_point",
+                "highest_point",
+            ]
+            + [f"holeyness_col_{c}" for c in range(self.cols)]
+            + [f"vertical_hole_depth_col_{c}" for c in range(self.cols)]
+            + [f"vertical_hole_clusteredness_col_{c}" for c in range(self.cols)]
+            + [f"horizontal_hole_edge_distance_row_{r}" for r in range(self.rows)]
+            + [f"horizontal_hole_clusteredness_row_{r}" for r in range(self.rows)]
+            + [
+                "mean_hole_depth",
+                "mean_hole_vertical_clusteredness",
+                "hole_depth_deviation",
+                "hole_vertical_instability",
+                "mean_hole_edge_distance",
+                "mean_hole_horizontal_clusteredness",
+                "hole_edge_distance_deviation",
+                "hole_horizontal_instability",
+                "mean_hole_distance",
+                "general_hole_clusteredness",
+            ]
+        )
+
+    @property
+    def state_feature_names(self):
+
+        return self._state_feature_names()
 
     @property
     def state_size(self):
-        return self.cols + 4
+        return len(self._state_feature_names())

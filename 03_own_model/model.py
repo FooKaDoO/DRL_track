@@ -7,13 +7,6 @@ class DQN(nn.Module):
 
         super(DQN, self).__init__()
 
-        # state parameters
-        # 10 column heights
-        # 1 number of holes
-        # 1 bumpiness
-        # 1 total height
-        # 1 complete lines
-
         self.fc1 = nn.Linear(state_size, 64)
         self.relu1 = nn.ReLU()
         self.fc2 = nn.Linear(64, 64)
