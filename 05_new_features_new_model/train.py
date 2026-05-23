@@ -15,20 +15,35 @@ from collections import deque
 from environment import TetrisEnv
 from model import DQN
 
-EPISODES = 2000
+EPISODES = 10000
 BATCH_SIZE = 512
 GAMMA = 0.99
 LR = 5e-4
 MEMORY_SIZE = 30000
 EPSILON_START = 1.0
 EPSILON_END = 0.001
-EPSILON_DECAY = 0.995
+EPSILON_DECAY = 0.9992
 TARGET_UPDATE = 10
+PLOT_UPDATE_INTERVAL = 100
+GRAD_CLIP_NORM = 10.0
 TORCH_NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
 
 torch.set_num_threads(TORCH_NUM_THREADS)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def should_save_checkpoint(episode):
+
+    remaining = EPISODES - episode
+
+    if remaining > 5000:
+        return episode % 1000 == 0
+    if remaining > 2000:
+        return episode % 500 == 0
+    if remaining > 600:
+        return episode % 200 == 0
+    return episode % 100 == 0
+
 
 def save_metrics_and_plots(scores, lines, epsilons, filename_prefix="training"):
 
@@ -86,6 +101,8 @@ def train():
 
     env = TetrisEnv()
     model = DQN(env.state_size).to(device)
+    checkpoint_dir = "checkpoints"
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     print(f"Device: {device}")
     print(f"Torch threads: {torch.get_num_threads()}")
@@ -97,7 +114,7 @@ def train():
     target_model.eval()
     
     optimizer = optim.Adam(model.parameters(), lr=LR)
-    criterion = nn.MSELoss() # mse for regression of q-values
+    criterion = nn.SmoothL1Loss() # smooth L1 loss for regression of q-values
 
     memory = deque(maxlen=MEMORY_SIZE)
     epsilon = EPSILON_START
@@ -216,6 +233,7 @@ def train():
                 loss = criterion(current_q, b_targets)
                 optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
                 optimizer.step()
 
         # Update metrics
@@ -233,9 +251,15 @@ def train():
         if episode % 10 == 0:
             print(f"Episode: {episode:4} | Score: {info['score']:6.1f} | Lines: {info['lines_cleared']:4} | Epsilon: {epsilon:.3f}")
 
-        # Save model and update plots periodically
-        if episode % 100 == 0:
+        if should_save_checkpoint(episode):
             torch.save(model.state_dict(), "tetris_dqn.pt")
+            torch.save(
+                model.state_dict(),
+                os.path.join(checkpoint_dir, f"tetris_dqn_ep{episode:05d}.pt"),
+            )
+
+        # Update plots periodically
+        if episode % PLOT_UPDATE_INTERVAL == 0:
             save_metrics_and_plots(scores_history, lines_history, epsilon_history)
 
     # Final save at the end of training

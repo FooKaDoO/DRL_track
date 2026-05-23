@@ -30,3 +30,16 @@ Additionally, we add LayerNorm, which normalizes the activations per sample, acr
 Additionally, we replace ReLU with SiLU, which doesn't remove, but reduces negative values and therefore neurons that would usually be dead, are kept alive. 
 
 Finally, we add conv1d over column features as a 5th group so we can learn more spacial details (bumps, cliffs, etc.)
+
+# Training
+
+Finally, training. We want to train a lot longer. Firstly, we optimize the training loop to work a lot faster. Then, we change some parameters.
+
+    EPISODES = 10000 (I benchmarked and this is around 5.5 hours)
+    EPSILON_DECAY = 0.9992 (so the model is a lot less greedy, reaches epsilon floor on episode 8632)
+
+Then changed nn.MSELoss() to nn.SmoothL1Loss(), which makes huge rewards/penalties smaller (not squared like MSE), to avoid overly large changes.
+
+Same reason is for clipping the gradient, since it is such a long-running task, we clip the gradient to not mess the entire training up due to 1 overly large reward/penalty.
+
+Finally, we add checkpoint saving to see results later. The checkpoint logic saves every 1000 episodes until episode 5000, then every 500 episodes until episode 2000, then every 200 episodes until episode 600 and then every 100 episodes until the end (10000th episode). Then it can be nicely seen afterwards, how the results look like.
