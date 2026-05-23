@@ -1,7 +1,18 @@
 # Features
 
-Previously, we removed the old "bumpiness" metric. After looking at how it plays, I understood one thing:
+Firstly, we removed the following 28 metrics
 
-It seems to try to get line-piece holes (even though it doesn't have a direct visual input, it seems to be able to infer it from the 95 features it has), which is a common strategy in tetris. But there is also a lot of noise. I think it evaluates this noise also as those lines.
+    mean_height
+    hole_depth_deviation
+    hole_vertical_instability
+    mean_hole_horizontal_clusterdness
+    hole_edge_deviation
+    hole_horizontal_instability
+    mean_hole_distance
+    general_hole_clusterdness
+    horizontal_hole_clusterdness_row_0-19
 
-Therefore, I want to introduce a new metric: "bumpiness", but I rename it to "height_diff". This would allow it to better understand what is going on.
+
+After removing 28 features, we have room for new features.
+
+One main feature, overlooked previously, is the next piece. This indicates heavily, what the possible moves are and what we should choose. Therefore, we make it a possible feature, a classification feature (for each piece, we have a feature and if the next piece is it, it is 1, otherwise 0)
