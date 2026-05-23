@@ -43,3 +43,19 @@ Outputs go to `shuffle_reports/`:
 - `*_summary.csv`: aggregate scores and deltas
 - `*_raw.csv`: per-seed raw results
 - `*_top.png`: bar chart of the biggest score drops
+
+Analyze the finished result files:
+
+```bash
+../.venv/bin/python analyze_shuffle_results.py
+```
+
+This writes `shuffle_reports/analysis/` with:
+
+- `shuffle_analysis_combined.csv`: all features in execution order, with rank
+- `features_execution_order.png/.svg`: all features in original order
+- `features_score_drop_order.png/.svg`: all features sorted by score drop
+- `execution_order_scatter.png/.svg`: score drop across the feature vector
+- `score_vs_lines_drop.png/.svg`: score sensitivity vs line sensitivity
+- `family_score_drop_boxplot.png/.svg`: feature-family comparison
+- `per_seed_score_delta_heatmap.png/.svg`: per-seed stability of each feature
