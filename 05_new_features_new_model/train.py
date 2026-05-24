@@ -15,14 +15,14 @@ from collections import deque
 from environment import TetrisEnv
 from model import DQN
 
-EPISODES = 10000
+EPISODES = 2000
 BATCH_SIZE = 512
-GAMMA = 0.99
-LR = 5e-4
+GAMMA = 0.98
+LR = 3e-4
 MEMORY_SIZE = 30000
 EPSILON_START = 1.0
-EPSILON_END = 0.001
-EPSILON_DECAY = 0.9992
+EPSILON_END = 0.05
+EPSILON_DECAY = 0.9985
 TARGET_UPDATE = 10
 PLOT_UPDATE_INTERVAL = 100
 GRAD_CLIP_NORM = 10.0
@@ -36,13 +36,13 @@ def should_save_checkpoint(episode):
 
     remaining = EPISODES - episode
 
-    if remaining > 5000:
-        return episode % 1000 == 0
-    if remaining > 2000:
-        return episode % 500 == 0
-    if remaining > 600:
-        return episode % 200 == 0
-    return episode % 100 == 0
+    if remaining > EPISODES // 2:
+        return episode % (EPISODES // 10) == 0
+    if remaining > EPISODES // 5:
+        return episode % (EPISODES // 20) == 0
+    if remaining > (3 * EPISODES) // 50:
+        return episode % (EPISODES // 50) == 0
+    return episode % (EPISODES // 100) == 0
 
 
 def save_metrics_and_plots(scores, lines, epsilons, filename_prefix="training"):
@@ -216,12 +216,20 @@ def train():
                     )
 
                     with torch.no_grad():
-                        next_q_values = target_model(nn_states).squeeze(1)
+                        # Online model chooses the best next state
+                        online_next_q = model(nn_states).squeeze(1)
+
+                        # Target model evaluates that chosen next state
+                        target_next_q = target_model(nn_states).squeeze(1)
 
                     offset = 0
                     for batch_index, count in zip(next_state_batch_indices, next_state_counts):
+                        q_slice_online = online_next_q[offset:offset + count]
+                        q_slice_target = target_next_q[offset:offset + count]
 
-                        max_q_next = next_q_values[offset:offset + count].max()
+                        best_next_idx = torch.argmax(q_slice_online)
+                        max_q_next = q_slice_target[best_next_idx]
+
                         b_targets[batch_index] += GAMMA * max_q_next
                         offset += count
                             
