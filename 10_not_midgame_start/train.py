@@ -18,7 +18,7 @@ from model import DQN
 EPISODES = 2000
 BATCH_SIZE = 512
 GAMMA = 0.98
-LR = 1e-3
+LR = 3e-4
 MEMORY_SIZE = 200000
 EPSILON_START = 1.0
 EPSILON_END = 0.05
@@ -27,7 +27,6 @@ TARGET_UPDATE = 10
 PLOT_UPDATE_INTERVAL = 100
 GRAD_CLIP_NORM = 10.0
 TORCH_NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
-RANDOM_START_PROB = 0.40
 
 torch.set_num_threads(TORCH_NUM_THREADS)
 
@@ -44,107 +43,6 @@ def should_save_checkpoint(episode):
     if remaining > (3 * EPISODES) // 50:
         return episode % (EPISODES // 50) == 0
     return episode % (EPISODES // 100) == 0
-
-
-def randomize_training_board(
-    self,
-    min_fill=0.30,
-    max_fill=0.60,
-    min_hole_rate=0.05,
-    max_hole_rate=0.20,
-    max_attempts=100,
-):
-    for _ in range(max_attempts):
-        board = np.zeros((self.rows, self.cols), dtype=np.float32)
-
-        fill_rate = random.uniform(min_fill, max_fill)
-        hole_rate = random.uniform(min_hole_rate, max_hole_rate)
-
-        target_filled_cells = int(fill_rate * self.rows * self.cols)
-        target_stack_area = int(target_filled_cells / max(1e-6, 1.0 - hole_rate))
-
-        avg_height = target_stack_area / self.cols
-
-        # Generate a varied but stack-like surface.
-        heights = np.random.normal(
-            loc=avg_height,
-            scale=max(1.0, avg_height * 0.35),
-            size=self.cols,
-        )
-
-        heights = np.clip(np.round(heights), 1, self.rows - 2).astype(int)
-
-        # Build solid stacks first.
-        for c, h in enumerate(heights):
-            board[self.rows - h:self.rows, c] = 1.0
-
-        # Carve holes from inside the stacks.
-        # Mostly uniform, with cheap random bias so holes are more varied.
-        candidates = []
-        weights = []
-
-        col_bias = np.random.uniform(0.6, 1.6, size=self.cols).astype(np.float32)
-        row_bias = np.random.uniform(0.7, 1.3, size=self.rows).astype(np.float32)
-
-        for c, h in enumerate(heights):
-            top_row = self.rows - h
-
-            # Exclude the top cell so the column height remains meaningful.
-            for r in range(top_row + 1, self.rows):
-                # 0 near top of stack, 1 near bottom of stack
-                depth = (r - top_row) / max(1, h - 1)
-
-                # Mostly uniform, but slightly prefers deeper buried holes.
-                depth_bias = 0.8 + 0.6 * depth
-
-                weight = col_bias[c] * row_bias[r] * depth_bias
-                candidates.append((r, c))
-                weights.append(weight)
-
-        num_holes = int(hole_rate * sum(heights))
-        num_holes = min(num_holes, len(candidates))
-
-        if num_holes > 0:
-            weights = np.asarray(weights, dtype=np.float32)
-            weights /= weights.sum()
-
-            selected = np.random.choice(
-                len(candidates),
-                size=num_holes,
-                replace=False,
-                p=weights,
-            )
-
-            for idx in selected:
-                r, c = candidates[idx]
-                board[r, c] = 0.0
-
-        # A post-clear Tetris board should not already contain full rows.
-        # Break any accidental full rows.
-        for r in range(self.rows):
-            if np.all(board[r] > 0):
-                c = random.randrange(self.cols)
-                board[r, c] = 0.0
-
-        self.board = board
-        self.score = 0
-        self.lines_cleared = 0
-        self.game_over = False
-        self.current_piece = self._random_piece()
-        self.next_piece = self._random_piece()
-        self.piece_active = False
-
-        # Require at least one real possible action.
-        valid_actions = [
-            a for a in self.get_possible_actions()
-            if self.get_state_for_action(a) is not None
-        ]
-
-        if valid_actions:
-            return True
-
-    self.reset()
-    return False
 
 
 def save_metrics_and_plots(scores, lines, epsilons, filename_prefix="training"):
@@ -227,20 +125,10 @@ def train():
     epsilon_history = []
 
     for episode in range(1, EPISODES + 1):
-
-        if random.random() < RANDOM_START_PROB:
-            randomize_training_board(
-                env,
-                min_fill=0.30,
-                max_fill=0.60,
-                min_hole_rate=0.05,
-                max_hole_rate=0.20,
-            )
-        else:
-            env.reset()
-
+        
+        env.reset()
+        env.spawn_piece()
         done = False
-        info = {"score": 0, "lines_cleared": 0}
         
         while not done:
 
