@@ -203,7 +203,8 @@ def train():
     for episode in range(1, EPISODES + 1):
 
         if random.random() < RANDOM_START_PROB:
-            env.randomize_training_board(
+            randomize_training_board(
+                env,
                 min_fill=0.30,
                 max_fill=0.60,
                 min_hole_rate=0.05,
