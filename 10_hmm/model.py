@@ -9,17 +9,6 @@ class DQN(nn.Module):
         if state_size != 84:
             raise ValueError(f"Group-aware DQN expects 84 input features, got {state_size}")
 
-        # self.column_encoder = nn.Sequential(
-        #     nn.Linear(50, 64),
-        #     nn.LayerNorm(64),
-        #     nn.SiLU(),
-        #     nn.Linear(64, 32),
-        #     nn.LayerNorm(32),
-        #     nn.SiLU(),
-        #     nn.Linear(32, 16),
-        #     nn.SiLU(),
-        # )
-
         self.column_conv_encoder = nn.Sequential(
             nn.Conv1d(5, 32, kernel_size=3, padding=1),
             nn.SiLU(),
@@ -85,13 +74,6 @@ class DQN(nn.Module):
         if was_single:
             x = x.unsqueeze(0)
 
-        # column_features = torch.cat([
-        #     x[:, 0:10],    # fill heights
-        #     x[:, 10:20],   # diff heights
-        #     x[:, 24:34],   # holeyness per column
-        #     x[:, 34:44],   # vertical hole depths
-        #     x[:, 44:54],   # vertical hole clusteredness
-        # ], dim=1)
         column_sequence = torch.stack([
             x[:, 0:10],    # fill heights
             x[:, 10:20],   # diff heights

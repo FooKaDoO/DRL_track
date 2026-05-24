@@ -15,14 +15,14 @@ from collections import deque
 from environment import TetrisEnv
 from model import DQN
 
-EPISODES = 5000
+EPISODES = 2000
 BATCH_SIZE = 512
 GAMMA = 0.98
-LR = 3e-4
+LR = 1e-3
 MEMORY_SIZE = 30000
 EPSILON_START = 1.0
-EPSILON_END = 0.05
-EPSILON_DECAY = 0.9995
+EPSILON_END = 0.001
+EPSILON_DECAY = 0.995
 TARGET_UPDATE = 10
 PLOT_UPDATE_INTERVAL = 100
 GRAD_CLIP_NORM = 10.0
@@ -241,7 +241,7 @@ def train():
                 loss = criterion(current_q, b_targets)
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
                 optimizer.step()
 
         # Update metrics
