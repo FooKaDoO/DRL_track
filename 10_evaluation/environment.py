@@ -477,7 +477,7 @@ class TetrisEnv:
 
     @property
     def state_size(self):
-        return 4 * self.cols + 2 * self.rows + 15 - 28 + len(PIECE_NAMES)
+        return 5 * self.cols + 2 * self.rows + 15 - 28 + len(PIECE_NAMES)
 
 
     def _get_board_features(self, board):
