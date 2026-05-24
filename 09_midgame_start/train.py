@@ -79,19 +79,45 @@ def randomize_training_board(
             board[self.rows - h:self.rows, c] = 1.0
 
         # Carve holes from inside the stacks.
+        # Mostly uniform, with cheap random bias so holes are more varied.
         candidates = []
+        weights = []
+
+        col_bias = np.random.uniform(0.6, 1.6, size=self.cols).astype(np.float32)
+        row_bias = np.random.uniform(0.7, 1.3, size=self.rows).astype(np.float32)
+
         for c, h in enumerate(heights):
             top_row = self.rows - h
 
             # Exclude the top cell so the column height remains meaningful.
             for r in range(top_row + 1, self.rows):
-                candidates.append((r, c))
+                # 0 near top of stack, 1 near bottom of stack
+                depth = (r - top_row) / max(1, h - 1)
 
-        random.shuffle(candidates)
+                # Mostly uniform, but slightly prefers deeper buried holes.
+                depth_bias = 0.8 + 0.6 * depth
+
+                weight = col_bias[c] * row_bias[r] * depth_bias
+                candidates.append((r, c))
+                weights.append(weight)
 
         num_holes = int(hole_rate * sum(heights))
-        for r, c in candidates[:num_holes]:
-            board[r, c] = 0.0
+        num_holes = min(num_holes, len(candidates))
+
+        if num_holes > 0:
+            weights = np.asarray(weights, dtype=np.float32)
+            weights /= weights.sum()
+
+            selected = np.random.choice(
+                len(candidates),
+                size=num_holes,
+                replace=False,
+                p=weights,
+            )
+
+            for idx in selected:
+                r, c = candidates[idx]
+                board[r, c] = 0.0
 
         # A post-clear Tetris board should not already contain full rows.
         # Break any accidental full rows.
