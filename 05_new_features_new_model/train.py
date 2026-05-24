@@ -251,8 +251,10 @@ def train():
         if episode % 10 == 0:
             print(f"Episode: {episode:4} | Score: {info['score']:6.1f} | Lines: {info['lines_cleared']:4} | Epsilon: {epsilon:.3f}")
 
-        if should_save_checkpoint(episode):
+        if episode % 100 == 0:
             torch.save(model.state_dict(), "tetris_dqn.pt")
+
+        if should_save_checkpoint(episode):
             torch.save(
                 model.state_dict(),
                 os.path.join(checkpoint_dir, f"tetris_dqn_ep{episode:05d}.pt"),
