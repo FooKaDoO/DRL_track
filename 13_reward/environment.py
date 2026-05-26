@@ -289,13 +289,13 @@ class TetrisEnv:
             4: 1200
         }
 
-	train_rewards = {
-	    0: 0,
-	    1: 100,
-	    2: 200,
-	    3: 250,
-	    4: 300
-	}
+		train_rewards = {
+		    0: 0,
+		    1: 100,
+		    2: 200,
+		    3: 250,
+		    4: 300
+		}
 
         reward = train_rewards.get(cleared, 300)
 
@@ -444,13 +444,13 @@ class TetrisEnv:
             4: 1200
         }
 
-	train_rewards = {
-	    0: 0,
-	    1: 100,
-	    2: 200,
-	    3: 250,
-	    4: 300
-	}
+		train_rewards = {
+		    0: 0,
+		    1: 100,
+		    2: 200,
+		    3: 250,
+		    4: 300
+		}
 
         reward = train_rewards.get(cleared, 300) # upper bound for more than 4 lines cleared
 
