@@ -289,9 +289,17 @@ class TetrisEnv:
             4: 1200
         }
 
-        reward = line_rewards.get(cleared, 1200)
+	train_rewards = {
+	    0: 0,
+	    1: 100,
+	    2: 200,
+	    3: 250,
+	    4: 300
+	}
 
-        self.score += reward
+        reward = train_rewards.get(cleared, 300)
+
+        self.score += line_rewards.get(cleared, 1200)
         self.lines_cleared += cleared
 
         # Advance to next piece
@@ -436,9 +444,17 @@ class TetrisEnv:
             4: 1200
         }
 
-        reward = line_rewards.get(cleared, 1200) # upper bound for more than 4 lines cleared
+	train_rewards = {
+	    0: 0,
+	    1: 100,
+	    2: 200,
+	    3: 250,
+	    4: 300
+	}
 
-        self.score += reward
+        reward = train_rewards.get(cleared, 300) # upper bound for more than 4 lines cleared
+
+        self.score += line_rewards.get(cleared, 1200)
         self.lines_cleared += cleared
 
         max_height = float(np.max(self._column_heights_from_board(self.board)))
