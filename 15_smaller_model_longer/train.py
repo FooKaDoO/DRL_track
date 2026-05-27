@@ -15,7 +15,7 @@ from collections import deque
 from environment import TetrisEnv
 from model import DQN
 
-EPISODES = 10000
+EPISODES = 20000
 BATCH_SIZE = 512
 GAMMA = 0.98
 LR = 1e-3
@@ -26,12 +26,9 @@ EPSILON_DECAY = 0.999
 TARGET_UPDATE = 10
 PLOT_UPDATE_INTERVAL = 100
 GRAD_CLIP_NORM = 10.0
-TORCH_NUM_THREADS = int(os.environ.get("TORCH_NUM_THREADS", "1"))
 LOAD_MODEL_PATH = "tetris_dqn.pt"
 LOAD_EXISTING_MODEL = True
 RESUME_EPSILON = 0.5
-
-torch.set_num_threads(TORCH_NUM_THREADS)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
