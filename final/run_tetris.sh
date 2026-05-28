@@ -1,0 +1,1 @@
+python play.py --mode agent --model_path tetris_dqn.pt
